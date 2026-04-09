@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.pyc
+
+# Environment
+.env
+
+# Reports (generated at runtime)
+reports/benchmark_report.html
+
+# MySQL data
+mysql_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
