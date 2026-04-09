@@ -1,0 +1,88 @@
+name: MySQL Load Simulator CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Schema Validation & Lint
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: load_simulator
+          MYSQL_USER: labuser
+          MYSQL_PASSWORD: labpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -prootpassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -u labuser -plabpassword --silent 2>/dev/null; then
+              echo "MySQL ready"; break
+            fi
+            echo "Waiting... ($i/30)"; sleep 2
+          done
+
+      - name: Apply schema
+        run: mysql -h 127.0.0.1 -u root -prootpassword load_simulator < sql/schema.sql
+
+      - name: Verify tables
+        run: mysql -h 127.0.0.1 -u root -prootpassword load_simulator -e "SHOW TABLES;"
+
+      - name: Schema smoke test
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_DATABASE: load_simulator
+          MYSQL_USER: labuser
+          MYSQL_PASSWORD: labpassword
+        run: |
+          python -c "
+import mysql.connector
+conn = mysql.connector.connect(host='127.0.0.1',port=3306,database='load_simulator',user='labuser',password='labpassword')
+cursor = conn.cursor()
+for t in ['users','products','orders','events','benchmark_log']:
+    cursor.execute(f'SELECT COUNT(*) FROM {t}')
+    print(f'  {t}: {cursor.fetchone()[0]} rows')
+conn.close()
+print('Smoke test passed')
+"
+
+      - name: Lint Python
+        run: |
+          pip install pyflakes
+          python -m pyflakes src/
+
+      - name: Done
+        run: echo "All checks passed"
